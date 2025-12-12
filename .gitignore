@@ -1,0 +1,5 @@
+*.log
+*.*~
+*.result
+*.result.*
+*.vtu

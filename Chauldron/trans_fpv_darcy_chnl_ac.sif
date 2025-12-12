@@ -1,0 +1,504 @@
+!-----------------------------------------------------
+! Cheese project case as defined by Tomas Johannesson.
+! We couple 3D elasticity equation with 2D thin film
+! flow. The convergence of the FSI system is enhaned with
+! method of artificial compressibility. Soft limiters
+! are used to ensure that ice never goes below bedrock.
+!
+! P.R. 11.9.2024
+!-----------------------------------------------------
+
+! Physical parameters of the case
+#rhoi=900.0
+#rhow=1000.0
+#h0 = 0.001  ! 0.005
+#MinH = 10.0
+#gravity=9.82
+#E=9.0e9
+#Arrh=3.0e-24
+#constvisc=1.0e13
+#etaw=1.7e-03
+#Lheat=3.34e05
+#nu=0.45
+
+#H=600.0 
+#L=1000.0    ! 1000 or 10000
+#Ly=2000.0    ! or 1000
+#D=E*H^3/(12*(1-nu^2))
+#K=D*24*(16/5)/Ly^4
+#bslp=0.0
+#P0=gravity*H*rhoi
+#ampltd=0.0
+#cavamplitude = 50.0
+
+! Numerical parameters of the coupling
+! Additionally relaxation paramters may be used to increase radius of convergence. 
+#frelax=2.0/3.0
+#erelax=4.0/5.0
+! tolerance to reach convergence
+#ftol=1.0e-2
+#etol=1.0e-4
+
+! #AC=1.5/K
+#AC=1.0/K
+#pcs=0.99
+
+#coeff=1.0
+
+
+#dt=1*10.0
+#nsteps=6*60*3
+#noutput=6*5
+
+!#dt=20.0
+!#nsteps=3*60*3
+!#noutput=3*5 
+
+!#dt=20.0
+!#nsteps=3*180
+!#noutput=3
+
+! for test runs 
+!#nsteps=12
+!!#noutput=1
+
+$tag="fpv_darcy_caldera_chnl_50m_2km_099pc_a00_ac1_01"
+
+!#nsteps=1
+!#coeff=0.0
+
+!---LUA BEGIN
+! assert(loadfile('./pd9.lua'))()
+!---LUA END
+
+
+echo on master
+
+Header
+  CHECK KEYWORDS Warn
+  Mesh DB "." "block2d" 
+  Include Path ""
+  Results Directory "results"
+End
+
+Simulation
+  Max Output Level = 3
+  Coordinate System = "Cartesian 3D"
+
+  Simulation Type = "Transient"
+  Timestepping Method = "implicit euler"
+  BDF Order = 1
+  Timestep Intervals(1) = #nsteps
+  Timestep Sizes(1) =     #dt
+  Output Intervals(1) =   #noutput
+
+  Initialize Dirichlet Conditions = False
+  
+  Preserve Baseline = Logical True
+! The FSI coupling is done on this level.
+! We should typically need maybe 10...50 steps, highly depends on desired accuracy.
+  Steady State Max Iterations = 20
+  Steady State Min Iterations = 1
+  
+  Output File = $tag$.result
+
+  Extruded Mesh Levels = 10  
+  Preserve baseline = Logical True
+
+  Post File = $tag$.vtu  
+  !vtu: save bulk only = logical true
+  vtu: exec solver = String "after saving"
+  vtu: ascii output = logical true
+  
+  Serendipity P Elements = True
+
+  Dirty Finish = Logical True
+
+  Simulation Timing = True
+End
+
+Constants
+  Gravity (4) = 0 0 -1 #gravity
+End
+
+Body 1
+  Name = "Ice"
+  Target Bodies(1) = 1
+  Equation = 1
+  Material = 1
+  Body Force = 1
+  Initial Condition = 1
+End
+
+Body 2
+  Target Bodies(1) = 2
+  Equation = 2
+  Material = 2   
+  Body Force = 2
+  Initial Condition = 2
+End 
+
+Initial Condition 1
+  Name = "Guess Ice"
+  Disp 3 = Real -1.0E-03
+  Disp 1 = Real 0.0
+  Disp 2 = Real 0.0
+  Depth = Variable Coordinate 1, Coordinate 2                                                                              
+     Real LUA "surface(tx[0],tx[1]) - bedrock(tx[0],tx[1]) - undulations(tx[0],tx[1])"
+End 
+
+Initial Condition 2
+  Name = "Guess Film"
+  FilmVelocity 1 = Real 0.001
+  FilmVelocity 2 = Real 0.0
+  FilmPressure = Variable Coordinate 1, Coordinate 2
+      Real LUA "pcs*rhoi*gravity*(surface(tx[0],tx[1]) - bedrock(tx[0],tx[1]) - undulations(tx[0],tx[1])) + initialcavity(tx[0],tx[1])*rhow*gravity" 
+  Bedrock Lowering = Real 0.0
+  Gap Disp =  Variable  Coordinate 1, Coordinate 2
+     Real LUA "h0 + initialcavity(tx[0],tx[1])"
+  Initial Cavity = Variable  Coordinate 1, Coordinate 2
+     Real LUA "initialcavity(tx[0],tx[1])"
+  ACField = Real #AC   
+End 
+
+Solver 1
+  Exec Solver = "before simulation"
+  Equation = "MapCoordinate"
+  Procedure = "StructuredMeshMapper" "StructuredMeshMapper"
+
+  Active Coordinate = Integer 3
+
+  Displacement Mode = Logical False
+  Correct Surface = Logical True
+  Minimum Height = Real #MinH
+
+  Correct Surface Mask = String "Glaciated"
+  Dot Product Tolerance = 1.0e-3
+
+  ! These are needed to host the variables that are read in
+  Variable = -nooutput "DummyMesh"
+End
+
+Solver 2
+  Equation = "Flowdepth"
+  Exec Solver = "Before all"
+
+  Procedure = File "ElmerIceSolvers" "FlowDepthSolver"
+  Variable = String "Depth"
+  Variable DOFs = 1
+
+  Gradient = Real -1.0E00
+
+  Calc Free Surface = Logical FALSE
+  Linear System Solver = "Iterative"
+  Linear System Max Iterations = 1500
+  Linear System Iterative Method = BiCGStab
+  Linear System Preconditioning = ILU0
+  Linear System Convergence Tolerance = Real 1.0e-7
+  Linear System Abort Not Converged = False
+  Linear System Residual Output = 1
+  Exported Variable 1 = -global "sheetvolume"
+End
+
+Solver 3
+  Equation = "Flowheight"
+  Exec Solver = "Before all"
+
+  Procedure = File "ElmerIceSolvers" "FlowDepthSolver"
+  Variable = String "Height"
+  Variable DOFs = 1
+
+  Gradient = Real 1.0E00
+
+  Calc Free Surface = Logical FALSE
+  Linear System Solver = "Iterative"
+  Linear System Max Iterations = 1500
+  Linear System Iterative Method = BiCGStab
+  Linear System Preconditioning = ILU0
+  Linear System Convergence Tolerance = Real 1.0e-7
+  Linear System Abort Not Converged = False
+  Linear System Residual Output = 1
+End
+
+Solver 4
+  Equation = "SaveScalars"
+  Procedure = "SaveData" "SaveScalars"
+  Exec Solver = "before timestep"
+  Filename = f-$tag$.dat
+
+  Parallel Reduce = True
+
+  Variable 1 = "timestep"
+  Variable 2 = "coupled iter"
+  Operator 3 = "cpu time"
+  Variable 4 = "gap disp"
+  Operator 4 = "min"
+  Operator 5 = "max"
+  Operator 6 = "boundary int"
+  Target Variable 6 = "sheetvolume"
+  Exec Solver = after timestep
+End 
+
+
+Solver 5
+  Equation = "Compute Compressibility"
+  !Exec Solver = "before timestep" ! we want to have an update even on NL level
+  Procedure = "AdjustAC.so" "AdjustAC"
+  Variable =  "ACField"
+  AC multiplication factor 1 = Real 1.0
+  AC multiplication factor 2 = Real 0.01
+  Exported Variable 1 = -global "Channel Volume"
+  Update Exported Variables = True
+  Exported Variable 2 = -dofs 1 "Gap Disp"
+  Exported Variable 3 = -dofs 1 "Bedrock Lowering"
+  Exported Variable 4 = -dofs 1 "Initial Cavity"        
+End  
+
+Solver 6
+  Equation = "FilmFlow"
+
+  !!!!!!!! REMOVE !!!!!!
+  !Exec Solver = "never"
+  !!!!!!!!!!!!!!!!!!!!!!
+  
+  !Exec Condition = Variable Time
+  !  Real LUA "(tx[0] - 1.5*dt)"
+  Model Dimension = Integer 2
+  Procedure = "FilmFlowSolver" "FilmFlowSolver"
+  Optimize Bandwidth = False
+
+!  Use Global Mass Matrix = True
+
+!  Steady State Convergence Measure = "solution"
+  Steady State Convergence Tolerance = #ftol
+  !Steady State Relaxation Factor = #frelax
+
+  Nonlinear System Max Iterations = 100
+  Nonlinear System Relaxation Factor = #0.1*frelax
+  Nonlinear System Convergence Tolerance = #0.01*ftol
+
+  Linear System Solver = "Direct"
+  Linear System Direct Method = "MUMPS"
+
+  Linear System Solver = "Iterative"
+  Linear System Iterative Method = "IDRS"
+  Idrs Parameter = 4
+  Linear System Preconditioning = "ILU2"
+
+  Linear System Max Iterations = 5000
+  Linear System Convergence Tolerance = 1.0e-8
+  
+  Linear System Abort Not Converged = True
+  Linear System GCR Restart = 300
+  Linear System Residual Output = 100
+
+  Number of Integration Points = 9 !16
+
+  Min Gap Height = Real #h0
+  Lateral Strain = Logical True
+
+!  Use Gap Average = Logical True
+  Convect = Logical True
+
+! When setting Dirichlet conditions for pressure set this True.
+! When for velocity set to False.
+  GradP Discretization = True
+
+  Relative Pressure Relaxation = Logical False
+
+  Friction Model = String "darcy2"
+
+  Calculate Friction Heating = Logical True
+  Calculate Pressure Heating = Logical True
+  Use Heating Source = Logical True
+End
+
+
+
+Solver 7
+  Equation = Linear elasticity
+  Procedure = "StressSolve" "StressSolver"
+  Variable =  String "t [Disp:3 Pressure:1]"
+  Variable DOFs = 4
+  Steady State Convergence Tolerance = #etol
+
+  Linear System Solver = "Iterative"
+  Linear System Iterative Method = "IDRS" !  "BICGStab"
+  Linear System GCR Restart = 250
+  Idrs Parameter = 4      
+  Linear System Max Iterations = 500
+  Linear System Convergence Tolerance = 1.0E-07
+  Linear System Abort Not Converged = False
+  Linear System Preconditioning = "ILU1"
+  Linear System Residual Output = 100
+
+  Nonlinear System Convergence Tolerance = 1.0e-1
+  Nonlinear System Max Iterations = 5
+  !Nonlinear System Relaxation Factor = #5.0/7.0
+
+
+  Element = "p:1 b:4"
+  !Element = "p:1 -tri b:1 -quad b:3 -wedge b:1 -brick b:4"
+  Incompressible = Logical True
+  Time Derivative Order = 1
+  Maxwell material=Logical True
+  
+  Apply Limiter = Logical True
+  Save Limiter = Logical True
+  Limiter Global Active Condition = Variable "Time"
+      Real LUA "1.00001*dt - tx[0]"
+  Calculate Velocity = Logical True
+  Displace Mesh =  Logical false
+  Exported Variable 1 = -dofs 4 "t velocity" ! [Disp Velocity:3 Pressure Velocity:1]"
+End
+
+
+
+Equation 1
+  Name = "ElastEq"
+  Active Solvers(5) = 1 2 3 4 7 
+End
+
+Equation 2
+  Name = "FilmEq"
+  Active Solvers(2) = 5 6
+End
+
+Material 1
+  Name = "Ice"
+  Youngs modulus = #E
+  Density = #rhoi
+  !Poisson ratio = #nu
+  Viscosity = #constvisc 
+
+  ! Nonnewtonian viscosity
+  Viscosity Model = String "Glen"
+  Glen Exponent = Real 3.0
+  Critical Shear Rate =  Real 1.0E-12
+
+  ! use that instead to set constant ratefactor
+  Arrhenius Factor = Real #Arrh
+  Set Arrhenius Factor = Logical True
+End
+
+Material 2
+  Name = "Water"
+  Density = #rhow
+  Viscosity = #etaw
+
+  Artificial Compressibility = Equals "ACField"
+
+  Gap Height = Equals "Gap Disp"
+  Darcy Roughness = Real 0.05
+  Latent Heat = Real #Lheat
+  Pressure Melting Coefficient = Real 7.42e-08
+  Water Heat Capacity = Real 4.218E03
+  !Bedrock Height = Equals "Coordinate 3"
+  Bedrock Height = Variable "Coordinate 3",  "Bedrock Lowering"
+    Real LUA "tx[0] - tx[1]"
+End
+
+
+Body Force 1
+  Stress Bodyforce 1 = Real 0.0
+  Stress Bodyforce 2 = Real 0.0
+  Stress Bodyforce 3 = #-gravity*rhoi
+End
+
+Body Force 2
+  Fsi Velocity = Equals "t velocity 3"
+  Bedrock Lowering = Variable "Heating Energy"
+    Real LUA "tx[0]/(rhow*Lheat)"
+  Gap Disp =  Variable  "Coordinate 1", "Coordinate 2", "bedrock lowering", "Disp 3"
+     Real LUA "h0 + tx[2] + tx[3] + initialcavity(tx[0],tx[1])"
+End
+
+
+Boundary Condition 1  
+  Name = "backface"
+  Target Boundaries(1) = 3
+  FilmPressure  = Variable Depth
+    Real LUA "tx[0]*rhoi*gravity"
+  Disp 3 = Real 0.0
+  Disp 1 = Real 0.0
+  Disp 2 = Real 0.0
+End
+
+Boundary Condition 2  
+  Name = "Channel End"
+
+ Target Boundaries(1) = 1
+  FilmPressure 1 = Real 0.0
+  Disp 3 = Real 0.0
+  Disp 1 = Real 0.0
+  Disp 2 = Real 0.0
+End
+
+Boundary Condition 3 
+  Name = "Sidelines"
+
+ Target Boundaries(2) = 2 4
+ Disp 3 = Real 0.0
+ Disp 1 = Real 0.0                                                                  
+ Disp 2 = Real 0.0    
+ FilmPressure  = Variable Depth
+     Real LUA "tx[0]*rhoi*gravity" 
+End
+
+Boundary Condition 4
+  Name = "backface extruded"
+  Target Boundaries(1) = 7
+  Disp 1 = Real 0.0
+  Disp 2 = Real 0.0 
+  Disp 3 = Real 0.0
+End
+
+Boundary Condition 5
+  Name = "Channel End extruded"
+  Target Boundaries(1) = 5
+  Disp 1 = Real 0.0
+  Disp 3 = Real 0.0
+End
+
+Boundary Condition 6
+  Name = "sideslines extruded"
+  Target Boundaries(2) = 6 8
+  Disp 2 = Real 0.0
+  ! keep at initially deformed state
+  Disp 3 = Real 0.0
+End
+
+Boundary Condition 7
+  Name = "Contact boundary"
+  Disp 3 Lower Limit = Variable Coordinate 1, Coordinate 2, Time
+    Real LUA "IfThenElse(1.00001*dt < tx[2],-1.0*initialcavity(tx[0],tx[1]),0)"
+  Disp 3 Lower Initial = Real 1.0
+  Disp 1 = Real 0.0
+  Disp 2 = Real 0.0
+  Normal Force = Variable "FilmPressure", "Gap Disp"
+    Real LUA "-coeff*(tx[0] - tx[1]*rhow*gravity)"
+  Bedrock Lowering = Variable "Heating Energy"
+    Real LUA "tx[0]/(rhow*Lheat)"
+  Gap Disp =  Variable  "Coordinate 1", "Coordinate 2", "bedrock lowering", "Disp 3"
+     Real LUA "h0 + tx[2] + tx[3] + initialcavity(tx[0],tx[1])"
+
+  Body Id = 2
+  Save Scalars = True
+  Height = Real 0.0
+  Bottom Surface = Variable Coordinate 1, Coordinate 2
+     Real LUA "bedrock(tx[0],tx[1]) + initialcavity(tx[0],tx[1]) + undulations(tx[0],tx[1])"
+  Initial Cavity = Variable Coordinate 1, Coordinate 2
+     Real LUA "initialcavity(tx[0],tx[1])"
+    
+End
+
+Boundary Condition 8  
+  Name = Top
+  Depth = Real 0.0
+  Top Surface = Variable Coordinate 1, Coordinate 2
+      Real LUA "surface(tx[0],tx[1])"
+End
+
+
+
+
