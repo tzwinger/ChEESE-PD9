@@ -5,4 +5,4 @@ Files in repository:
 * [`trans_fpv_darcy_chnl_ac.sif`](trans_fpv_darcy_chnl_ac.sif) Elmer solver input file (SIF) for transient run of cauldron water transfer experiment
 * [`pd9.lua`](pd9.lua) LUA definition file needed by SIF
 * [`block2d.geo`](block2d.geo) gmsh definition file of footprint geometry; run with `gmsh -2 block2d.geo` 
-* [`block2d`](block2d) mesh subdirectory containing foootprint mesh; create with `ElmerGrid 14 2  block2d.msh -autoclean` from output of above `gmsh`-command above
+* [`block2d`](block2d) mesh subdirectory containing foootprint mesh; create with `ElmerGrid 14 2  block2d.msh -autoclean` from output of above `gmsh`-command
